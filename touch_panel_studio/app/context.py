@@ -8,7 +8,7 @@ from touch_panel_studio.infrastructure.auth.auth_service import AuthService
 from touch_panel_studio.infrastructure.storage.project_storage import ProjectStorage
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass
 class AppContext:
     paths: AppPaths
     app_db: SessionFactory

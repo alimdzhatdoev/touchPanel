@@ -49,6 +49,7 @@ class ScreenRow(BaseModel):
     background_value: str | None = None
     background_fit: str = "contain"
     background_scale_percent: int = 100
+    transition_json: str = "{}"
 
 
 class ComponentRow(BaseModel):

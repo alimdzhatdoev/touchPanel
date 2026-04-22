@@ -63,6 +63,7 @@ class ProjectExportService:
                     "background_value": x.background_value,
                     "background_fit": getattr(x, "background_fit", None) or "contain",
                     "background_scale_percent": int(getattr(x, "background_scale_percent", None) or 100),
+                    "transition_json": getattr(x, "transition_json", None) or "{}",
                 }
                 for x in screens
             ],

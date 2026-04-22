@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
 
 from touch_panel_studio.app.context import AppContext
 from touch_panel_studio.domain.enums.roles import UserRole
-from touch_panel_studio.infrastructure.storage.project_storage import ProjectHandle, ProjectStorageError
+from touch_panel_studio.infrastructure.storage.project_storage import ProjectHandle, ProjectStorage, ProjectStorageError
+from touch_panel_studio.infrastructure.storage.working_dir import load_working_dir, save_working_dir
 from touch_panel_studio.ui.windows.create_project_dialog import CreateProjectDialog
 from touch_panel_studio.infrastructure.import_export.export_service import ProjectExportService
 from touch_panel_studio.infrastructure.import_export.import_service import ProjectImportService, ImportError as TPanelImportError
@@ -26,6 +27,7 @@ from touch_panel_studio.infrastructure.import_export.migrator import VersionMigr
 from touch_panel_studio.infrastructure.import_export.validator import TemplateValidator
 from touch_panel_studio.ui.windows.profile_dialog import ProfileDialog
 from touch_panel_studio.ui.windows.user_admin_dialog import UserAdminDialog
+from touch_panel_studio.ui.windows.working_dir_dialog import WorkingDirDialog
 
 
 class ProjectManagerWidget(QWidget):
@@ -84,6 +86,11 @@ class ProjectManagerWidget(QWidget):
         actions.addWidget(self.btn_duplicate)
         actions.addWidget(self.btn_archive)
         actions.addStretch(1)
+        self.btn_workdir = QPushButton("Сменить рабочую папку")
+        self.btn_workdir.setMinimumHeight(44)
+        self.btn_workdir.setToolTip("Выбрать папку хранения проектов и медиафайлов")
+        self.btn_workdir.clicked.connect(self._change_working_dir)
+        actions.addWidget(self.btn_workdir)
         self.btn_logout = QPushButton("Выход")
         self.btn_logout.setMinimumHeight(44)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
@@ -285,5 +292,15 @@ class ProjectManagerWidget(QWidget):
             QMessageBox.critical(self, "Ошибка импорта", str(e))
             return
         QMessageBox.information(self, "Готово", f"Проект импортирован:\n{handle.meta.name} — {handle.meta.code}")
+        self.reload()
+
+    def _change_working_dir(self) -> None:
+        current = load_working_dir(self._ctx.paths.config_dir)
+        dlg = WorkingDirDialog(current=current, parent=self)
+        if dlg.exec() != dlg.DialogCode.Accepted or dlg.chosen_path is None:
+            return
+        chosen = dlg.chosen_path
+        save_working_dir(self._ctx.paths.config_dir, chosen)
+        self._ctx.projects = ProjectStorage(projects_root=chosen)
         self.reload()
 

@@ -130,6 +130,7 @@ class ProjectImportService:
                     background_value=src.background_value,
                     background_fit=src.background_fit,
                     background_scale_percent=int(src.background_scale_percent),
+                    transition_json=src.transition_json,
                 )
                 s.add(sc)
                 s.flush()

@@ -10,11 +10,15 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 from touch_panel_studio.app.context import AppContext
 from touch_panel_studio.infrastructure.auth.remember_credentials import clear as clear_remembered_credentials
 from touch_panel_studio.infrastructure.auth.remember_credentials import load as load_remembered_credentials
+from touch_panel_studio.domain.enums.roles import UserRole
+from touch_panel_studio.infrastructure.storage.project_storage import ProjectStorage
+from touch_panel_studio.infrastructure.storage.working_dir import load_working_dir, save_working_dir
 from touch_panel_studio.ui.windows.first_admin_dialog import FirstAdminDialog
 from touch_panel_studio.ui.windows.login import LoginWidget
 from touch_panel_studio.ui.windows.project_manager import ProjectManagerWidget
 from touch_panel_studio.ui.windows.splash import SplashWidget
 from touch_panel_studio.ui.windows.studio import OpenProject, StudioWidget
+from touch_panel_studio.ui.windows.working_dir_dialog import WorkingDirDialog
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ class AppController:
         self._splash = SplashWidget()
         self._login = LoginWidget(ctx, self._on_logged_in)
         self._pm = ProjectManagerWidget(ctx)
+        self._viewer_runtime = None  # RuntimeWindow открытый для viewer
 
         self._stack.addWidget(self._splash)
         self._stack.addWidget(self._login)
@@ -134,6 +139,12 @@ class AppController:
         try:
             self._session.user_id = user_id
             self._session.role = role
+
+            # Проверяем/выбираем рабочую папку перед показом PM
+            if not self._ensure_working_dir():
+                # Пользователь отказался выбирать — выходим
+                return
+
             self._pm.set_session(user_id=int(user_id), role=str(role))
             self._pm.reload()
             self._stack.setCurrentWidget(self._pm)
@@ -146,8 +157,43 @@ class AppController:
             logger.exception("После входа")
             QMessageBox.critical(self._window, "Ошибка", f"Не удалось открыть список проектов:\n{e}")
 
+    def _ensure_working_dir(self) -> bool:
+        """Загружает сохранённую рабочую папку или просит выбрать новую.
+        Возвращает False если пользователь отказался (отмена)."""
+        config_dir = self._ctx.paths.config_dir
+        saved = load_working_dir(config_dir)
+
+        if saved is not None and saved.exists():
+            # Папка уже настроена — просто применяем
+            self._apply_working_dir(saved)
+            return True
+
+        # Папка не задана или не существует — показываем диалог
+        dlg = WorkingDirDialog(current=saved, parent=self._window)
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        if dlg.exec() != dlg.DialogCode.Accepted or dlg.chosen_path is None:
+            return False
+
+        chosen = dlg.chosen_path
+        save_working_dir(config_dir, chosen)
+        self._apply_working_dir(chosen)
+        return True
+
+    def _apply_working_dir(self, path) -> None:
+        """Обновляет ProjectStorage на новый путь."""
+        from pathlib import Path
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        self._ctx.projects = ProjectStorage(projects_root=p)
+
     def _on_open_project(self, project_code: str) -> None:
         handle = self._ctx.projects.open_project(project_code)
+        role = (self._session.role or "").lower().strip()
+
+        if role == UserRole.viewer.value:
+            self._open_as_viewer(handle)
+            return
+
         opened = OpenProject(handle=handle, project_db_engine_title=str(handle.db_file))
         self._studio = StudioWidget(self._ctx, opened)
         self._studio.btn_back.clicked.connect(self._back_to_projects)  # type: ignore[attr-defined]
@@ -155,6 +201,14 @@ class AppController:
         self._stack.addWidget(self._studio)
         self._stack.setCurrentWidget(self._studio)
         self._window.setWindowTitle(f"Touch Panel Studio — {handle.meta.name} ({handle.meta.code})")
+
+    def _open_as_viewer(self, handle) -> None:  # type: ignore[no-untyped-def]
+        from touch_panel_studio.ui.runtime.runtime_window import RuntimeWindow
+        project_db = handle.open_db()
+        w = RuntimeWindow(project_db=project_db, home_timeout_sec=60, assets_dir=handle.assets_dir)
+        self._viewer_runtime = w
+        w.destroyed.connect(lambda: setattr(self, "_viewer_runtime", None))
+        w.showFullScreen()
 
     def _back_to_projects(self) -> None:
         self._pm.reload()
