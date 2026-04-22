@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsRectItem, QStyleOptionGraphicsItem, QWidget
 
 from touch_panel_studio.db.models.component import Component
@@ -188,15 +188,36 @@ class EditorComponentItem(QGraphicsRectItem):
         del option, widget
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+        r = self.rect()
+        t = self._type
+
+        # Backdrop blur preview: crop blurred background at item's scene position
+        blur_r = int(self._style.get("blur_radius", 0))
+        if blur_r > 0:
+            scene = self.scene()
+            if hasattr(scene, "get_blurred_background"):
+                blurred = scene.get_blurred_background(blur_r)
+                if blurred is not None and not blurred.isNull():
+                    sp = self.scenePos()
+                    crop = blurred.copy(int(sp.x()), int(sp.y()), int(r.width()), int(r.height()))
+                    radius = float(self._style.get("radius", 0))
+                    radius = max(0.0, min(radius, min(r.width(), r.height()) / 2.0))
+                    painter.save()
+                    painter.setOpacity(1.0)
+                    if radius > 0:
+                        clip_path = QPainterPath()
+                        clip_path.addRoundedRect(r, radius, radius)
+                        painter.setClipPath(clip_path)
+                    painter.drawPixmap(r.toRect(), crop, crop.rect())
+                    painter.restore()
+
         op = float(self._style.get("opacity", 1.0))
         if op < 0:
             op = 0.0
         if op > 1:
             op = 1.0
         painter.setOpacity(op)
-
-        r = self.rect()
-        t = self._type
 
         if t in ("shape.rectangle", "shape", "rectangle"):
             paint_rounded_rect(painter, r, self._style, fill=True, stroke=True)

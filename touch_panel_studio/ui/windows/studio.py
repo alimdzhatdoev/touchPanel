@@ -238,8 +238,26 @@ class StudioWidget(QWidget):
         self.grid_opacity_slider.setValue(int(self._editor_settings.grid_opacity * 100))
         self.grid_opacity_slider.setToolTip("0 — сетка скрыта")
         grid_form.addRow("Прозрачность сетки", self.grid_opacity_slider)
-        self.editor_grid_group.setLayout(grid_form)
         self.grid_opacity_slider.valueChanged.connect(self._on_grid_opacity_changed)
+
+        snap_step_row = QWidget()
+        snap_row_layout = QHBoxLayout(snap_step_row)
+        snap_row_layout.setContentsMargins(0, 0, 0, 0)
+        snap_row_layout.setSpacing(4)
+        self._snap_step_btns: dict[int, QPushButton] = {}
+        for step in (1, 5, 10, 20):
+            b = QPushButton(str(step))
+            b.setCheckable(True)
+            b.setFixedWidth(40)
+            b.setMinimumHeight(28)
+            b.clicked.connect(lambda _checked=False, s=step: self._set_snap_step(s))
+            snap_row_layout.addWidget(b)
+            self._snap_step_btns[step] = b
+        snap_row_layout.addStretch(1)
+        self._snap_step_btns[20].setChecked(True)
+        grid_form.addRow("Шаг (px)", snap_step_row)
+
+        self.editor_grid_group.setLayout(grid_form)
 
         left_layout.addWidget(self.screen_size_group)
         left_layout.addWidget(self.screen_bg_group)
@@ -537,6 +555,11 @@ class StudioWidget(QWidget):
         self._editor_settings = EditorSettings(grid_opacity=a)
         save_editor_settings(self._ctx.paths.config_dir, self._editor_settings)
         self.editor.scene.set_grid_opacity(a)
+
+    def _set_snap_step(self, step: int) -> None:
+        self.editor.scene.grid_size = step
+        for s, b in self._snap_step_btns.items():
+            b.setChecked(s == step)
 
     def _save_screen_bg_layout(self) -> None:
         if self._block_screen_bg:

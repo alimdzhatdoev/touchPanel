@@ -4,7 +4,28 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QGraphicsBlurEffect, QGraphicsPixmapItem, QGraphicsScene
 from touch_panel_studio.ui.common.text_typography import paint_styled_text_block
+
+
+def blur_pixmap(pixmap: QPixmap, radius: float) -> QPixmap:
+    """Размывает пиксмап через временную QGraphicsScene (стандартная техника Qt)."""
+    if radius <= 0 or pixmap.isNull():
+        return pixmap
+    scene = QGraphicsScene()
+    item = QGraphicsPixmapItem(pixmap)
+    effect = QGraphicsBlurEffect()
+    effect.setBlurRadius(float(radius))
+    effect.setBlurHints(QGraphicsBlurEffect.BlurHint.QualityHint)
+    item.setGraphicsEffect(effect)
+    scene.addItem(item)
+    result = QPixmap(pixmap.size())
+    result.fill(Qt.GlobalColor.transparent)
+    p = QPainter(result)
+    scene.render(p, QRectF(result.rect()), QRectF(item.boundingRect()))
+    p.end()
+    scene.deleteLater()
+    return result
 
 
 def stroke_pen_from_style(style: dict) -> QPen:

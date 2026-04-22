@@ -8,10 +8,7 @@ from typing import Callable
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRect, QRectF, QTimer, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
-    QGraphicsBlurEffect,
     QGraphicsOpacityEffect,
-    QGraphicsPixmapItem,
-    QGraphicsScene,
     QLabel,
     QPushButton,
     QWidget,
@@ -21,6 +18,7 @@ from touch_panel_studio.db.models.component import Component
 from touch_panel_studio.db.models.screen import Screen
 from touch_panel_studio.infrastructure.storage.asset_paths import load_pixmap_from_file, resolve_asset_file
 from touch_panel_studio.ui.common.background_compose import compose_screen_background_pixmap
+from touch_panel_studio.ui.common.component_canvas_paint import blur_pixmap as _blur_pixmap_fn
 from touch_panel_studio.ui.runtime.runtime_mirror_widgets import (
     RuntimeMirrorButton,
     RuntimeMirrorImageWidget,
@@ -165,23 +163,7 @@ class ScreenAnimController:
 
 
 def _blur_pixmap(pixmap: QPixmap, radius: float) -> QPixmap:
-    """Размывает пиксмап через временную QGraphicsScene (стандартная техника Qt)."""
-    if radius <= 0 or pixmap.isNull():
-        return pixmap
-    scene = QGraphicsScene()
-    item = QGraphicsPixmapItem(pixmap)
-    effect = QGraphicsBlurEffect()
-    effect.setBlurRadius(float(radius))
-    effect.setBlurHints(QGraphicsBlurEffect.BlurHint.QualityHint)
-    item.setGraphicsEffect(effect)
-    scene.addItem(item)
-    result = QPixmap(pixmap.size())
-    result.fill(Qt.transparent)
-    p = QPainter(result)
-    scene.render(p, QRectF(result.rect()), QRectF(item.boundingRect()))
-    p.end()
-    scene.deleteLater()
-    return result
+    return _blur_pixmap_fn(pixmap, radius)
 
 
 class RuntimeRenderer:

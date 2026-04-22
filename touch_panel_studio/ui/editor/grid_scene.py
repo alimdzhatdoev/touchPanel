@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QGraphicsScene
 
 from touch_panel_studio.infrastructure.storage.asset_paths import load_pixmap_from_file, resolve_asset_file
 from touch_panel_studio.ui.common.background_compose import compose_screen_background_pixmap
+from touch_panel_studio.ui.common.component_canvas_paint import blur_pixmap as _blur_pixmap
 
 
 def _letterbox_qcolor(bg_type: str, bg_value: str | None) -> QColor:
@@ -35,6 +36,8 @@ class GridScene(QGraphicsScene):
         self._bg_scale_percent = 100
         self._assets_dir: Path | None = None
         self._grid_opacity = 0.45
+        self._bg_cache_pm: QPixmap | None = None
+        self._blur_cache: dict[int, QPixmap] = {}
         self._rebuild_grid_pens()
 
     def set_grid_opacity(self, alpha: float) -> None:
@@ -73,7 +76,47 @@ class GridScene(QGraphicsScene):
                 pm = load_pixmap_from_file(p)
                 if pm is not None and not pm.isNull():
                     self._bg_pixmap = pm
+        self._rebuild_bg_cache()
         self.invalidate()
+
+    def _rebuild_bg_cache(self) -> None:
+        self._blur_cache.clear()
+        sr = self.sceneRect()
+        w, h = int(sr.width()), int(sr.height())
+        if w <= 0 or h <= 0:
+            self._bg_cache_pm = None
+            return
+        pm = QPixmap(w, h)
+        if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
+            letter = _letterbox_qcolor(self._bg_type, self._bg_value)
+            composed = compose_screen_background_pixmap(
+                self._bg_pixmap,
+                w,
+                h,
+                fit=self._bg_fit,
+                scale_percent=self._bg_scale_percent,
+                letterbox=letter,
+            )
+            p = QPainter(pm)
+            p.drawPixmap(0, 0, composed)
+            p.end()
+        else:
+            c = QColor("#ffffff")
+            if self._bg_type == "color" and self._bg_value:
+                try:
+                    c = QColor(self._bg_value)
+                except Exception:
+                    pass
+            pm.fill(c)
+        self._bg_cache_pm = pm
+
+    def get_blurred_background(self, blur_radius: int) -> QPixmap | None:
+        """Возвращает размытую версию фона экрана (кешируется по радиусу)."""
+        if self._bg_cache_pm is None or self._bg_cache_pm.isNull():
+            return None
+        if blur_radius not in self._blur_cache:
+            self._blur_cache[blur_radius] = _blur_pixmap(self._bg_cache_pm, float(blur_radius))
+        return self._blur_cache[blur_radius]
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         sr = self.sceneRect()

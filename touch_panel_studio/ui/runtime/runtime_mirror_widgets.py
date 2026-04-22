@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from touch_panel_studio.ui.common.component_canvas_paint import (
@@ -37,8 +37,14 @@ class _MirrorPaintWidget(QWidget):
             return
         pos = self.pos()
         crop = self._backdrop_source.copy(pos.x(), pos.y(), self.width(), self.height())
+        radius = float(self._style.get("radius", 0))
+        radius = max(0.0, min(radius, min(self.width(), self.height()) / 2.0))
         painter.save()
         painter.setOpacity(1.0)
+        if radius > 0:
+            clip = QPainterPath()
+            clip.addRoundedRect(QRectF(self.rect()), radius, radius)
+            painter.setClipPath(clip)
         painter.drawPixmap(0, 0, crop)
         painter.restore()
 
@@ -135,8 +141,14 @@ class RuntimeMirrorButton(QPushButton):
         if self._backdrop_source is not None and not self._backdrop_source.isNull():
             pos = self.pos()
             crop = self._backdrop_source.copy(pos.x(), pos.y(), self.width(), self.height())
+            radius = float(self._style.get("radius", 0))
+            radius = max(0.0, min(radius, min(self.width(), self.height()) / 2.0))
             p.save()
             p.setOpacity(1.0)
+            if radius > 0:
+                clip = QPainterPath()
+                clip.addRoundedRect(QRectF(self.rect()), radius, radius)
+                p.setClipPath(clip)
             p.drawPixmap(0, 0, crop)
             p.restore()
         op = float(self._style.get("opacity", 1.0))
