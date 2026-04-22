@@ -104,6 +104,15 @@ class PropertyInspectorWidget(QWidget):
         self.opacity.setRange(0.0, 1.0)
         self.opacity.setSingleStep(0.05)
 
+        self.blur_radius = QSpinBox()
+        self.blur_radius.setRange(0, 60)
+        self.blur_radius.setSingleStep(2)
+        self.blur_radius.setSuffix(" px")
+        self.blur_radius.setToolTip(
+            "Размытие фона ПОД компонентом (backdrop blur).\n"
+            "Сам контент остаётся чётким — размывается только то, что находится под ним."
+        )
+
         self.look_group = QGroupBox("Внешний вид")
         lf = QFormLayout()
         lf.setSpacing(8)
@@ -112,6 +121,7 @@ class PropertyInspectorWidget(QWidget):
         lf.addRow("Толщина обводки", self.stroke_w)
         lf.addRow("Скругление (px)", self.radius)
         lf.addRow("Прозрачность", self.opacity)
+        lf.addRow("Блюр фона (px)", self.blur_radius)
         self.look_group.setLayout(lf)
 
         self.content_text = QLineEdit()
@@ -257,6 +267,36 @@ class PropertyInspectorWidget(QWidget):
         af.addRow("URL", self.action_url)
         act.setLayout(af)
 
+        self.anim_type = QComboBox()
+        self.anim_type.addItem("Нет", "none")
+        self.anim_type.addItem("Появление (fade)", "fade")
+        self.anim_type.addItem("Слева", "slide_left")
+        self.anim_type.addItem("Справа", "slide_right")
+        self.anim_type.addItem("Сверху", "slide_up")
+        self.anim_type.addItem("Снизу", "slide_down")
+        self.anim_type.addItem("Всплытие (zoom)", "zoom")
+
+        self.anim_delay = QSpinBox()
+        self.anim_delay.setRange(0, 5000)
+        self.anim_delay.setSingleStep(50)
+        self.anim_delay.setSuffix(" мс")
+        self.anim_delay.setToolTip("Задержка перед началом анимации")
+
+        self.anim_duration = QSpinBox()
+        self.anim_duration.setRange(50, 5000)
+        self.anim_duration.setSingleStep(50)
+        self.anim_duration.setValue(500)
+        self.anim_duration.setSuffix(" мс")
+        self.anim_duration.setToolTip("Длительность анимации")
+
+        self.anim_group = QGroupBox("Анимация появления")
+        animf = QFormLayout()
+        animf.setSpacing(8)
+        animf.addRow("Тип", self.anim_type)
+        animf.addRow("Задержка", self.anim_delay)
+        animf.addRow("Длительность", self.anim_duration)
+        self.anim_group.setLayout(animf)
+
         inner = QWidget()
         il = QVBoxLayout()
         il.setContentsMargins(0, 0, 0, 0)
@@ -270,6 +310,7 @@ class PropertyInspectorWidget(QWidget):
         il.addWidget(self.content_group)
         il.addWidget(self.typo_group)
         il.addWidget(act)
+        il.addWidget(self.anim_group)
         il.addStretch(1)
         inner.setLayout(il)
 
@@ -300,6 +341,7 @@ class PropertyInspectorWidget(QWidget):
             self.stroke_w,
             self.radius,
             self.opacity,
+            self.blur_radius,
             self.content_text,
             self.font_size,
             self.text_color,
@@ -326,6 +368,9 @@ class PropertyInspectorWidget(QWidget):
         self.text_underline.toggled.connect(self._emit_data)
         self.action_kind.currentIndexChanged.connect(self._on_action_kind_changed)
         self.action_screen.currentIndexChanged.connect(self._emit_data)
+        self.anim_type.currentIndexChanged.connect(self._emit_data)
+        self.anim_delay.valueChanged.connect(self._emit_data)
+        self.anim_duration.valueChanged.connect(self._emit_data)
 
         self.btn_import_icon.clicked.connect(lambda: self._import_into_line(self.icon_src))
         self.btn_import_image.clicked.connect(lambda: self._import_into_line(self.image_src))
@@ -403,6 +448,7 @@ class PropertyInspectorWidget(QWidget):
             self.stroke_w.setValue(int(st.get("stroke_width", 1)))
             self.radius.setValue(int(st.get("radius", 0)))
             self.opacity.setValue(float(st.get("opacity", 1.0)))
+            self.blur_radius.setValue(int(st.get("blur_radius", 0)))
 
             if state.comp_type == "text":
                 self.text_stack.setCurrentWidget(self.text_multiline)
@@ -478,6 +524,12 @@ class PropertyInspectorWidget(QWidget):
                 idx = self.action_screen.findData(int(tid))
                 if idx >= 0:
                     self.action_screen.setCurrentIndex(idx)
+
+            at_raw = str(st.get("anim_type", "none")).lower()
+            at_ix = self.anim_type.findData(at_raw)
+            self.anim_type.setCurrentIndex(at_ix if at_ix >= 0 else 0)
+            self.anim_delay.setValue(int(st.get("anim_delay", 0)))
+            self.anim_duration.setValue(max(50, int(st.get("anim_duration", 500))))
         finally:
             self._block = False
 
@@ -558,6 +610,13 @@ class PropertyInspectorWidget(QWidget):
             style["underline"] = bool(self.text_underline.isChecked())
             if ct == "text":
                 style["opacity"] = op
+
+        style["blur_radius"] = int(self.blur_radius.value())
+
+        at = self.anim_type.currentData()
+        style["anim_type"] = str(at) if at is not None else "none"
+        style["anim_delay"] = int(self.anim_delay.value())
+        style["anim_duration"] = int(self.anim_duration.value())
 
         bindings: dict[str, Any] = {}
         ak = self.action_kind.currentText()

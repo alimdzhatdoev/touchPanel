@@ -20,6 +20,11 @@ def apply_project_schema_migrations(engine: Engine) -> None:
         stmts.append(
             "ALTER TABLE screens ADD COLUMN background_scale_percent INTEGER NOT NULL DEFAULT 100"
         )
+    if "transition_json" not in cols:
+        stmts.append(
+            "ALTER TABLE screens ADD COLUMN transition_json TEXT NOT NULL DEFAULT '{}'"
+        )
+
     if not stmts:
         return
     with engine.begin() as conn:

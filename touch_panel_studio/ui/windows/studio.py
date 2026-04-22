@@ -87,6 +87,7 @@ class StudioWidget(QWidget):
         self._project_db = self._opened.handle.open_db()
         self._block_screen_bg = False
         self._block_screen_size = False
+        self._block_screen_transition = False
         self._aspect_ratio_wh = 1920.0 / 1080.0
         self._editor_settings = load_editor_settings(self._ctx.paths.config_dir)
 
@@ -199,6 +200,36 @@ class StudioWidget(QWidget):
         self.screen_bg_fit.currentIndexChanged.connect(self._save_screen_bg_layout)
         self.screen_bg_scale.valueChanged.connect(self._save_screen_bg_layout)
 
+        self.screen_transition_group = QGroupBox("Переход (анимация входа)")
+        self.screen_trans_type = QComboBox()
+        self.screen_trans_type.addItem("Нет", "none")
+        self.screen_trans_type.addItem("Появление (fade)", "fade")
+        self.screen_trans_type.addItem("Слева направо", "slide_right")
+        self.screen_trans_type.addItem("Справа налево", "slide_left")
+        self.screen_trans_type.addItem("Сверху вниз", "slide_down")
+        self.screen_trans_type.addItem("Снизу вверх", "slide_up")
+        self.screen_trans_duration = QSpinBox()
+        self.screen_trans_duration.setRange(50, 3000)
+        self.screen_trans_duration.setSingleStep(50)
+        self.screen_trans_duration.setValue(400)
+        self.screen_trans_duration.setSuffix(" мс")
+        self.screen_trans_duration.setToolTip("Длительность анимации перехода")
+        self.screen_trans_delay = QSpinBox()
+        self.screen_trans_delay.setRange(0, 3000)
+        self.screen_trans_delay.setSingleStep(50)
+        self.screen_trans_delay.setValue(0)
+        self.screen_trans_delay.setSuffix(" мс")
+        self.screen_trans_delay.setToolTip("Задержка перед началом перехода")
+        trans_form = QFormLayout()
+        trans_form.setSpacing(8)
+        trans_form.addRow("Тип", self.screen_trans_type)
+        trans_form.addRow("Длительность", self.screen_trans_duration)
+        trans_form.addRow("Задержка", self.screen_trans_delay)
+        self.screen_transition_group.setLayout(trans_form)
+        self.screen_trans_type.currentIndexChanged.connect(self._save_screen_transition)
+        self.screen_trans_duration.valueChanged.connect(self._save_screen_transition)
+        self.screen_trans_delay.valueChanged.connect(self._save_screen_transition)
+
         self.editor_grid_group = QGroupBox("Сетка канваса")
         grid_form = QFormLayout()
         grid_form.setSpacing(8)
@@ -212,6 +243,7 @@ class StudioWidget(QWidget):
 
         left_layout.addWidget(self.screen_size_group)
         left_layout.addWidget(self.screen_bg_group)
+        left_layout.addWidget(self.screen_transition_group)
         left_layout.addWidget(self.editor_grid_group)
         left_layout.addWidget(self.btn_screen_new)
         left_layout.addWidget(self.btn_screen_home)
@@ -389,15 +421,18 @@ class StudioWidget(QWidget):
         if not sid:
             self.screen_size_group.setEnabled(False)
             self.screen_bg_group.setEnabled(False)
+            self.screen_transition_group.setEnabled(False)
             return
         self.screen_size_group.setEnabled(True)
         self.screen_bg_group.setEnabled(True)
+        self.screen_transition_group.setEnabled(True)
         with self._project_db.session() as s:
             sc = s.get(Screen, sid)
             if sc is None:
                 return
             self._block_screen_size = True
             self._block_screen_bg = True
+            self._block_screen_transition = True
             try:
                 self.screen_width.setValue(int(sc.width))
                 self.screen_height.setValue(int(sc.height))
@@ -411,9 +446,22 @@ class StudioWidget(QWidget):
                 fit = str(getattr(sc, "background_fit", None) or "contain")
                 self.screen_bg_fit.setCurrentIndex({"contain": 0, "cover": 1, "stretch": 2}.get(fit.lower(), 0))
                 self.screen_bg_scale.setValue(int(getattr(sc, "background_scale_percent", None) or 100))
+
+                tj_raw = getattr(sc, "transition_json", None) or "{}"
+                try:
+                    tj = json.loads(tj_raw) if isinstance(tj_raw, str) else {}
+                    tj = tj if isinstance(tj, dict) else {}
+                except Exception:
+                    tj = {}
+                ttype = str(tj.get("type", "none")).lower()
+                tix = self.screen_trans_type.findData(ttype)
+                self.screen_trans_type.setCurrentIndex(tix if tix >= 0 else 0)
+                self.screen_trans_duration.setValue(max(50, int(tj.get("duration", 400))))
+                self.screen_trans_delay.setValue(max(0, int(tj.get("delay", 0))))
             finally:
                 self._block_screen_size = False
                 self._block_screen_bg = False
+                self._block_screen_transition = False
         self._sync_aspect_ratio_from_spinboxes()
         self._sync_screen_bg_fields_visibility()
 
@@ -503,6 +551,21 @@ class StudioWidget(QWidget):
             s.commit()
         self.editor.load_screen(sid)
         self._sync_inspector_from_selection()
+
+    def _save_screen_transition(self) -> None:
+        if self._block_screen_transition:
+            return
+        sid = self._selected_screen_id()
+        if not sid:
+            return
+        tdata = {
+            "type": str(self.screen_trans_type.currentData() or "none"),
+            "duration": int(self.screen_trans_duration.value()),
+            "delay": int(self.screen_trans_delay.value()),
+        }
+        with self._project_db.session() as s:
+            self._repo.update_transition(s, sid, transition_json=json.dumps(tdata, ensure_ascii=False))
+            s.commit()
 
     def _import_screen_background_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

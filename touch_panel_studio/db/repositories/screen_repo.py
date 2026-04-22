@@ -88,3 +88,10 @@ class ScreenRepository:
             .values(width=int(width), height=int(height))
         )
 
+    def update_transition(self, session: Session, screen_id: int, *, transition_json: str) -> None:
+        session.execute(
+            update(Screen)
+            .where(Screen.id == screen_id)
+            .values(transition_json=str(transition_json))
+        )
+

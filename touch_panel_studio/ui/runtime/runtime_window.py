@@ -4,9 +4,18 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Qt, QUrl
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPoint,
+    QPropertyAnimation,
+    QTimer,
+    Qt,
+    QUrl,
+)
 from PySide6.QtGui import QDesktopServices, QIcon
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from sqlalchemy import select
 
@@ -72,6 +81,10 @@ class RuntimeWindow(QMainWindow):
         self._activity_filter = _ActivityFilter(self._reset_home_timer)
         self.installEventFilter(self._activity_filter)
 
+        # Активный оверлей перехода (если есть — прерываем его перед новым)
+        self._overlay: QLabel | None = None
+        self._overlay_anim: QPropertyAnimation | None = None
+
         self.setWindowTitle("Runtime Player")
         lp = app_logo_path()
         if lp is not None:
@@ -94,7 +107,7 @@ class RuntimeWindow(QMainWindow):
             home = next((sc for sc in published if sc.is_home), None) or published[0]
             self._nav.home_screen_id = int(home.id)
 
-        self.open_screen(int(home.id), push_history=False)
+        self.open_screen(int(home.id), push_history=False, animated=False)
         self._reset_home_timer()
 
     def _reset_home_timer(self) -> None:
@@ -102,11 +115,13 @@ class RuntimeWindow(QMainWindow):
             return
         self._home_timer.start(self._home_timeout_sec * 1000)
 
-    def open_screen(self, screen_id: int, push_history: bool = True) -> None:
+    def open_screen(self, screen_id: int, push_history: bool = True, animated: bool = True) -> None:
         if push_history and self._nav.current_screen_id is not None:
             self._nav.history.append(int(self._nav.current_screen_id))
 
+        old_widget = self._stack.currentWidget()
         self._nav.current_screen_id = int(screen_id)
+
         w = self._widgets_by_screen.get(int(screen_id))
         if w is None:
             w = self._build_screen_widget(int(screen_id))
@@ -115,7 +130,23 @@ class RuntimeWindow(QMainWindow):
             self._widgets_by_screen[int(screen_id)] = w
             self._stack.addWidget(w)
 
-        self._stack.setCurrentWidget(w)
+        ctrl = getattr(w, "_entry_anim_ctrl", None)
+
+        # Сбрасываем виджеты в начальное состояние ДО показа экрана —
+        # иначе при повторном заходе они мелькнут в финальной позиции.
+        if ctrl is not None:
+            ctrl.reset()
+
+        if animated and old_widget is not None and old_widget is not w:
+            transition = self._get_screen_transition(screen_id)
+            self._do_transition(old_widget, w, transition)
+        else:
+            self._stack.setCurrentWidget(w)
+
+        # Запускаем анимации компонентов после того как экран стал текущим
+        if ctrl is not None:
+            ctrl.play()
+
         self._reset_home_timer()
 
     def go_back(self) -> None:
@@ -130,6 +161,106 @@ class RuntimeWindow(QMainWindow):
             return
         self._nav.history.clear()
         self.open_screen(int(self._nav.home_screen_id), push_history=False)
+
+    # ------------------------------------------------------------------
+    # Экранные переходы
+    # ------------------------------------------------------------------
+
+    def _get_screen_transition(self, screen_id: int) -> dict:
+        try:
+            with self._db.session() as s:
+                sc = s.get(Screen, screen_id)
+                if sc is None:
+                    return {}
+                raw = getattr(sc, "transition_json", None) or "{}"
+                d = json.loads(raw) if isinstance(raw, str) else {}
+                return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def _do_transition(self, old_widget: QWidget, new_widget: QWidget, transition: dict) -> None:
+        anim_type = str(transition.get("type", "none")).lower().strip()
+        duration = max(100, int(transition.get("duration", 400)))
+        delay = max(0, int(transition.get("delay", 0)))
+
+        if anim_type in ("none", ""):
+            self._stack.setCurrentWidget(new_widget)
+            return
+
+        # Прерываем предыдущий переход
+        if self._overlay_anim is not None:
+            self._overlay_anim.stop()
+            self._overlay_anim = None
+        if self._overlay is not None:
+            self._overlay.deleteLater()
+            self._overlay = None
+
+        # Захватываем снимок текущего экрана
+        old_pm = self._stack.grab()
+
+        # Переключаем стек на новый экран немедленно
+        self._stack.setCurrentWidget(new_widget)
+
+        # Создаём оверлей поверх окна с изображением старого экрана
+        overlay = QLabel(self)
+        overlay.setPixmap(old_pm)
+        stack_pos = self._stack.mapTo(self, QPoint(0, 0))
+        overlay.setGeometry(stack_pos.x(), stack_pos.y(), self._stack.width(), self._stack.height())
+        overlay.show()
+        overlay.raise_()
+        self._overlay = overlay
+
+        def _cleanup() -> None:
+            if self._overlay is overlay:
+                overlay.deleteLater()
+                self._overlay = None
+            self._overlay_anim = None
+
+        if anim_type == "fade":
+            effect = QGraphicsOpacityEffect(overlay)
+            effect.setOpacity(1.0)
+            overlay.setGraphicsEffect(effect)
+            anim = QPropertyAnimation(effect, b"opacity", self)
+            anim.setDuration(duration)
+            anim.setStartValue(1.0)
+            anim.setEndValue(0.0)
+            anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+            anim.finished.connect(_cleanup)
+            self._overlay_anim = anim
+
+        elif anim_type in ("slide_left", "slide_right", "slide_up", "slide_down"):
+            sw, sh = self._stack.width(), self._stack.height()
+            if anim_type == "slide_left":
+                end_pos = QPoint(stack_pos.x() - sw, stack_pos.y())
+            elif anim_type == "slide_right":
+                end_pos = QPoint(stack_pos.x() + sw, stack_pos.y())
+            elif anim_type == "slide_up":
+                end_pos = QPoint(stack_pos.x(), stack_pos.y() - sh)
+            else:
+                end_pos = QPoint(stack_pos.x(), stack_pos.y() + sh)
+
+            anim = QPropertyAnimation(overlay, b"pos", self)
+            anim.setDuration(duration)
+            anim.setStartValue(QPoint(stack_pos.x(), stack_pos.y()))
+            anim.setEndValue(end_pos)
+            anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+            anim.finished.connect(_cleanup)
+            self._overlay_anim = anim
+
+        else:
+            # Неизвестный тип — просто убираем оверлей
+            overlay.deleteLater()
+            self._overlay = None
+            return
+
+        if delay > 0:
+            QTimer.singleShot(delay, self._overlay_anim.start)
+        else:
+            self._overlay_anim.start()
+
+    # ------------------------------------------------------------------
+    # Построение виджета экрана
+    # ------------------------------------------------------------------
 
     def _build_screen_widget(self, screen_id: int) -> QWidget | None:
         with self._db.session() as s:
@@ -185,4 +316,3 @@ class RuntimeWindow(QMainWindow):
             on_component_clicked=on_component_clicked,
             assets_dir=self._assets_dir,
         )
-

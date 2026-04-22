@@ -27,6 +27,7 @@ class Screen(Base, TimestampMixin):
     # Картинка: contain — вписать с полями; cover — заполнить с обрезкой; stretch — растянуть.
     background_fit: Mapped[str] = mapped_column(String(16), default="contain", nullable=False)
     background_scale_percent: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    transition_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
 
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
