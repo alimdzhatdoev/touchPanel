@@ -25,6 +25,7 @@ from touch_panel_studio.db.models.screen_action import ScreenAction
 from touch_panel_studio.core.branding import app_logo_path
 from touch_panel_studio.db.session import SessionFactory
 from touch_panel_studio.ui.runtime.runtime_renderer import RuntimeRenderer
+from touch_panel_studio.ui.runtime.touch_ripple_overlay import install_ripple
 
 
 @dataclass(slots=True)
@@ -91,7 +92,19 @@ class RuntimeWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(lp)))
         self.setWindowFlag(Qt.FramelessWindowHint, True)
 
+        self._ripple_overlay = install_ripple(self)
         self._load_and_start()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._ripple_overlay.resize(self.size())
+        self._ripple_overlay.raise_()
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        from PySide6.QtWidgets import QApplication
+        if hasattr(self, "_tap_filter"):
+            QApplication.instance().removeEventFilter(self._tap_filter)  # type: ignore[union-attr]
+        super().closeEvent(event)
 
     def _load_and_start(self) -> None:
         with self._db.session() as s:
@@ -142,6 +155,8 @@ class RuntimeWindow(QMainWindow):
             self._do_transition(old_widget, w, transition)
         else:
             self._stack.setCurrentWidget(w)
+            # Ripple должен быть поверх стека после любого переключения
+            self._ripple_overlay.raise_()
 
         # Запускаем анимации компонентов после того как экран стал текущим
         if ctrl is not None:
@@ -208,6 +223,8 @@ class RuntimeWindow(QMainWindow):
         overlay.setGeometry(stack_pos.x(), stack_pos.y(), self._stack.width(), self._stack.height())
         overlay.show()
         overlay.raise_()
+        # Ripple всегда поверх transition-оверлея
+        self._ripple_overlay.raise_()
         self._overlay = overlay
 
         def _cleanup() -> None:
@@ -215,6 +232,8 @@ class RuntimeWindow(QMainWindow):
                 overlay.deleteLater()
                 self._overlay = None
             self._overlay_anim = None
+            # Убеждаемся что ripple на вершине после удаления transition-оверлея
+            self._ripple_overlay.raise_()
 
         if anim_type == "fade":
             effect = QGraphicsOpacityEffect(overlay)
